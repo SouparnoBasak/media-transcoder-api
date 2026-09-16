@@ -1,0 +1,16 @@
+What Is Left to Build (Remaining Roadmap)
+1. Real-Time Status Push (Closing the API Loop)
+WebSocket Integration / Redis Pub/Sub: Set up a Fastify WebSocket server (@fastify/websocket) so frontend clients receive instant, real-time status updates when a file reaches COMPLETED or FAILED without polling the HTTP API.
+
+2. Multi-Tenant File Isolation & Security
+Tenant Scoping: Enforce strict organization/user isolation across MinIO bucket keys (processed/{tenantId}/{fileId}) and database queries.
+
+Signed Download URLs: Implement short-lived GET presigned URLs so raw and processed media are never exposed publicly.
+
+3. Video Processing Capabilities
+FFmpeg Pipeline: Expand the Python worker with ffmpeg-python to handle video compression, adaptive bitrate streaming (HLS .m3u8 playlists), and automated thumbnail frame extraction.
+
+4. Production Readiness & DevOps
+Docker Containerization: Package the Fastify API, Redis, MinIO, and Python worker into scalable, production-grade Docker containers.
+
+Dead Letter Queues & Monitoring: Set up failure dashboards and alert mechanisms for stalled or repeatedly failing queue jobs.

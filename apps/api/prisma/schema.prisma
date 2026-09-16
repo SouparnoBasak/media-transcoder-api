@@ -1,0 +1,53 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = "postgresql://saas_user:saas_password@localhost:5432/saas_db"
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+  files        File[]
+
+  @@map("users")
+}
+
+model File {
+  id           String     @id @default(uuid())
+  userId       String     @map("user_id")
+  originalName String     @map("original_name")
+  storageKey   String     @map("storage_key")
+  status       FileStatus @default(PENDING)
+  mimeType     String     @map("mime_type")
+  sizeBytes    BigInt     @map("size_bytes")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobs         Job[]
+
+  @@index([userId])
+  @@map("files")
+}
+
+model Job {
+  id           String    @id @default(uuid())
+  fileId       String    @map("file_id")
+  actionType   String    @map("action_type")
+  errorMessage String?   @map("error_message")
+  completedAt  DateTime? @map("completed_at")
+  file         File      @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([fileId])
+  @@map("jobs")
+}
+
+enum FileStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
