@@ -2,6 +2,8 @@ import Fastify,{FastifyRequest, FastifyReply} from 'fastify';
 import fastifyJwt from '@fastify/jwt';
 import bcrypt from 'bcrypt';
 import dotenv from 'dotenv';
+import path from 'path';
+
 import { prisma } from './lib/prisma';
 import { error } from 'node:console';
 
@@ -12,10 +14,12 @@ import { s3Client } from './lib/s3';
 import { randomUUID } from 'node:crypto';
 
 import { mediaQueue } from './lib/queue';
+import { initCleanupJobs } from './lib/cleanup';
 
 dotenv.config()
 
 const app=Fastify({logger:true});
+initCleanupJobs();
 
 app.register(fastifyJwt,{
     secret: process.env.JWT_SECRET||"fallback_secret" 
@@ -85,6 +89,10 @@ app.get('/api/v1/me',{onRequest:[async (request,reply)=>app.authenticate(request
     return reply.code(200).send(user);
 });
 
+const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
+const ALLOWED_MIME_TYPES=['image/jpeg','image/png','image/webp'];
+const MAX_FILE_SIZE_BYTES=20*1024*1024;
+const MAX_USER_STORAGE_BYTES=500*1024*1024;
 const BUCKET_NAME=process.env.RAW_MEDIA_BUCKET||"raw-media-bucket";
 
 app.post('/api/v1/files/upload-url',
@@ -94,7 +102,49 @@ app.post('/api/v1/files/upload-url',
         if(!originalName || !mimeType || !sizeBytes){
             return reply.code(400).send({error:"Missing file metadeta"});
         }
+        const fileExt = path.extname(originalName).toLowerCase();
+        if (!ALLOWED_EXTENSIONS.includes(fileExt)) {
+            return reply.code(400).send({
+                error: `Forbidden extension '${fileExt}'. Allowed: ${ALLOWED_EXTENSIONS.join(', ')}`,
+            });
+        }
+        if(!ALLOWED_MIME_TYPES.includes(mimeType)){
+            return reply.code(400).send({
+                error:`Unsupported format: ${mimeType}. Allowed formats: ${ALLOWED_MIME_TYPES.join(', ')}`
+            })
+        }
+
+        const isJpegMismatch = (fileExt === '.jpg' || fileExt === '.jpeg') && mimeType !== 'image/jpeg';
+        const isPngMismatch = fileExt === '.png' && mimeType !== 'image/png';
+        const isWebpMismatch = fileExt === '.webp' && mimeType !== 'image/webp';
+
+        if (isJpegMismatch || isPngMismatch || isWebpMismatch) {
+            return reply.code(400).send({ error: 'File extension does not match the provided MIME type' });
+        }
+
+        if(sizeBytes>MAX_FILE_SIZE_BYTES){
+            return reply.code(400).send({
+                error:`File size exceeds the limit of ${MAX_FILE_SIZE_BYTES/(1024*1024)} MB`,
+            })
+        }
+
         const userId=request.user.userId;
+        const userStorageUsage= await prisma.file.aggregate({
+            where:{
+                userId,
+                status:{in:['PENDING','COMPLETED','PROCESSING']}
+            },
+            _sum:{
+                sizeBytes: true,
+            }
+        })
+        const currentUsage=Number(userStorageUsage._sum.sizeBytes||0);
+        if((currentUsage+sizeBytes)>MAX_USER_STORAGE_BYTES){
+            return reply.code(400).send({
+                error:`Storage quota excedded. Used: ${(currentUsage/(1024*1024)).toFixed(2)} MB. Limit: ${(MAX_USER_STORAGE_BYTES/(1024*1024))} MB`,
+            })
+        }
+
         const fileextension=originalName.split(".").pop();
         const storageKey=`uploads/${userId}/${randomUUID()}.${fileextension}`;
 
@@ -112,7 +162,8 @@ app.post('/api/v1/files/upload-url',
         const cmnd=new PutObjectCommand({
             Bucket:BUCKET_NAME,
             Key:storageKey,
-            ContentType:mimeType
+            ContentType:mimeType,
+            ContentLength:sizeBytes,
         });
 
         const uploadUrl=await getSignedUrl(s3Client,cmnd,{expiresIn:900});
