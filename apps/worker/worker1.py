@@ -6,7 +6,6 @@ from datetime import datetime
 from bullmq import Worker
 import psycopg2
 import boto3
-import time
 from PIL import Image
 
 JOB_TIMEOUT_SECONDS=60

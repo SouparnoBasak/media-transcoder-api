@@ -39,19 +39,20 @@ s3=boto3.client(
     region_name="us-east-1"
 )
 
-async def update_db_status(fileId,actionType,error=None):
+async def update_db_status(fileId,actionType,error=None,fileStatus=None):
     conn=psycopg2.connect(DB_URL)
     cursor=conn.cursor()
     try:
-        status="FAILED" if error else "COMPLETED"
-        cursor.execute(
-            '''
-            UPDATE FILES
-            SET STATUS=%s::"FileStatus" 
-            WHERE id =%s
-            ''',
-            (status,fileId)
-        )
+        if fileStatus:
+            cursor.execute(
+                '''
+                UPDATE FILES
+                SET STATUS=%s::"FileStatus" 
+                WHERE id =%s
+                ''',
+                (fileStatus,fileId)
+            )
+            print("file table updated")
 
         completedAt=None if error else datetime.utcnow()
         cursor.execute(
@@ -162,8 +163,12 @@ def child_entry(job_data,result_queue):
             "error":str(e)
         })   
 
+def is_final_attempt(job):
+    return job.attemptsMade >= job.opts.get("attempts", 1) - 1
 
 async def process_job(job,token):
+    print("JOB ID:", job.id)
+    print("ATTEMPTS MADE:", getattr(job, "attemptsMade", "NOT FOUND"))
     job_data={
         "fileId":job.data.get("fileId"),
         "userId":job.data.get("userId"),
@@ -191,7 +196,8 @@ async def process_job(job,token):
             await update_db_status(
                 fileId=job_data["fileId"],
                 actionType="IMAGE-RESIZE-WEBP",
-                error="Process timed out after 60 seconds"
+                error="Process timed out after 60 seconds",
+                fileStatus="FAILED" if is_final_attempt(job) else None
             )
             raise Exception('Process timed out after 60s')
         
@@ -203,13 +209,15 @@ async def process_job(job,token):
             await update_db_status(
                 fileId=job_data["fileId"],
                 actionType="IMAGE-RESIZE-WEBP",
-                error=result["error"]
+                error=result["error"],
+                fileStatus="FAILED" if is_final_attempt(job) else None
             )
             raise Exception(result["error"])
         
         await update_db_status(
             fileId=job_data['fileId'],
-            actionType="IMAGE-RESIZE-WEBP"
+            actionType="IMAGE-RESIZE-WEBP",
+            fileStatus="COMPLETED"
         )
         return result["result"]
 
