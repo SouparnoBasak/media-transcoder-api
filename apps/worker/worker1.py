@@ -6,6 +6,7 @@ from datetime import datetime
 from bullmq import Worker
 import psycopg2
 import boto3
+import time
 from PIL import Image
 
 JOB_TIMEOUT_SECONDS=60
@@ -69,6 +70,9 @@ async def update_db_status(fileId,actionType,error=None):
         conn.close()
 
 async def execute_media_pipeline(job):
+    print("inside child process")
+    time.sleep(70)
+    print("after sleep")
     data=job.data
     fileId=data.get('fileId')
     userId=data.get('userId')
