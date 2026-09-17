@@ -16,6 +16,9 @@ import { randomUUID } from 'node:crypto';
 import { mediaQueue } from './lib/queue';
 import { initCleanupJobs } from './lib/cleanup';
 
+import { setupRealtimeEvents } from './lib/events';
+import websocketPlugin from '@fastify/websocket';
+
 dotenv.config()
 
 const app=Fastify({logger:true});
@@ -254,8 +257,12 @@ app.get('/api/v1/files/:id/download',
 
 const start=async ()=>{
     try{
+        await app.register(websocketPlugin);
+        setupRealtimeEvents(app);
+
         const port=Number(process.env.PORT)||3000;
         await app.listen({port,host:'0.0.0.0'});
+        console.log(`Server running on http://localhost:${port}`);
     }catch(err){
         app.log.error(err);
         process.exit(1);

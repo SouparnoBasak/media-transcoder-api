@@ -1,5 +1,6 @@
 import asyncio
 from multiprocessing import Process,Queue
+import redis
 import io
 import json
 import os
@@ -38,6 +39,16 @@ s3=boto3.client(
     aws_secret_access_key=MINIO_PASS,
     region_name="us-east-1"
 )
+r = redis.Redis.from_url(REDIS_URL)
+
+def publish_file_event(userId, fileId, status, error=None):
+    payload = json.dumps({
+        "userId": userId,
+        "fileId": fileId,
+        "status": status,
+        "error": error
+    })
+    r.publish("file:events", payload)
 
 async def update_db_status(fileId,actionType,error=None,fileStatus=None):
     conn=psycopg2.connect(DB_URL)
@@ -197,9 +208,19 @@ async def process_job(job,token):
                 error="Process timed out after 60 seconds",
                 fileStatus="FAILED" if is_final_attempt(job) else None
             )
+            if is_final_attempt(job):
+                publish_file_event(userId=job_data["userId"],fileId=job_data["fileId"],status='FAILED',error="Process timed out after 60 seconds")
             raise Exception('Process timed out after 60s')
         
         if result_queue.empty():
+            await update_db_status(
+                fileId=job_data["fileId"],
+                actionType="IMAGE-RESIZE-WEBP",
+                error="Child process exited without a result",
+                fileStatus="FAILED" if is_final_attempt(job) else None
+            )
+            if is_final_attempt(job):
+                publish_file_event(userId=job_data["userId"],fileId=job_data["fileId"],status='FAILED',error="Child process exited without a result")
             raise Exception ("Child process exited without a result")
         
         result=result_queue.get()
@@ -210,6 +231,8 @@ async def process_job(job,token):
                 error=result["error"],
                 fileStatus="FAILED" if is_final_attempt(job) else None
             )
+            if is_final_attempt(job):
+                publish_file_event(userId=job_data["userId"],fileId=job_data["fileId"],status='FAILED',error=result["error"])
             raise Exception(result["error"])
         
         await update_db_status(
@@ -217,6 +240,7 @@ async def process_job(job,token):
             actionType="IMAGE-RESIZE-WEBP",
             fileStatus="COMPLETED"
         )
+        publish_file_event(userId=job_data["userId"],fileId=job_data["fileId"],status='COMPLETED')
         return result["result"]
 
     finally:
