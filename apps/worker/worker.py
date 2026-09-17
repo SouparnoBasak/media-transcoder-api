@@ -74,8 +74,6 @@ async def update_db_status(fileId,actionType,error=None,fileStatus=None):
 
 def execute_media_pipeline_sync(data):
     print("INSIDE PIPELINE")
-    time.sleep(70)
-    print("After sleep:goodmorning")
     fileId = data["fileId"]
     userId = data["userId"]
     storageKey = data["storageKey"]
