@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "tsx watch src/server.ts"
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc"
   },
   "keywords": [],
   "author": "",
@@ -14,6 +15,7 @@
     "@aws-sdk/client-s3": "^3.1131.0",
     "@aws-sdk/s3-request-presigner": "^3.1131.0",
     "@fastify/jwt": "^10.2.2",
+    "@fastify/websocket": "^11.3.0",
     "@prisma/client": "^5.22.0",
     "bcrypt": "^6.0.0",
     "bullmq": "^6.3.6",
@@ -21,12 +23,15 @@
     "fastify": "^5.12.4",
     "ioredis": "^6.0.0",
     "node-cron": "^4.6.0",
-    "prisma": "^5.22.0"
+    "prisma": "^5.22.0",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
     "@types/node": "^26.5.1",
     "@types/node-cron": "^3.0.11",
+    "@types/ws": "^8.18.1",
+    "@typescript/typescript-linux-x64": "^7.0.2",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   }

@@ -1,8 +1,0 @@
-{
-  "dependencies": {
-    "node-cron": "^4.6.0"
-  },
-  "devDependencies": {
-    "@types/node-cron": "^3.0.11"
-  }
-}

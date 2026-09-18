@@ -34,6 +34,14 @@ declare module '@fastify/jwt'{
         user:{userId:string, email:string}
     }
 }
+declare module 'fastify' {
+    interface FastifyInstance {
+        authenticate: (
+            request: FastifyRequest,
+            reply: FastifyReply
+        ) => Promise<void | FastifyReply>;
+    }
+}
 
 app.decorate('authenticate',async (request:FastifyRequest,reply:FastifyReply)=>{
     try{
