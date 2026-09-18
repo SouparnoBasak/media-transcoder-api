@@ -54,10 +54,9 @@ def check_s3_key_exists(s_client,bucket,key):
     try:
         s3.head_object(Bucket=bucket,Key=key)
         return True
-    except ClienError as e:
-        if e.response['Error']['code']=='404':
+    except Exception as e:
+        if e.response['Error']['Code']=='404':
             return False
-        return e
 
 
 async def update_db_status(fileId,actionType,error=None,fileStatus=None):
