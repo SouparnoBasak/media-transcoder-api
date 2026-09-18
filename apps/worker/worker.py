@@ -50,6 +50,16 @@ def publish_file_event(userId, fileId, status, error=None):
     })
     r.publish("file:events", payload)
 
+def check_s3_key_exists(s_client,bucket,key):
+    try:
+        s3.head_object(Bucket=bucket,Key=key)
+        return True
+    except ClienError as e:
+        if e.response['Error']['code']=='404':
+            return False
+        return e
+
+
 async def update_db_status(fileId,actionType,error=None,fileStatus=None):
     conn=psycopg2.connect(DB_URL)
     cursor=conn.cursor()
@@ -59,7 +69,7 @@ async def update_db_status(fileId,actionType,error=None,fileStatus=None):
                 '''
                 UPDATE FILES
                 SET STATUS=%s::"FileStatus" 
-                WHERE id =%s
+                WHERE id =%s AND STATUS!= 'COMPLETED'
                 ''',
                 (fileStatus,fileId)
             )
@@ -88,68 +98,73 @@ def execute_media_pipeline_sync(data):
     fileId = data["fileId"]
     userId = data["userId"]
     storageKey = data["storageKey"]
-    try:
-        s3_response = s3.get_object(
-        Bucket=RAW_BUCKET,
-        Key=storageKey
-    )
-    except Exception as minio_error:
-        raise RuntimeError(
-            f"Error while fetching data; {minio_error}"
-        )
-    
-    raw_bytes = s3_response["Body"].read()
+    display_key = f"processed/{userId}/{fileId}/display.webp"
+    thumbnail_key = f"processed/{userId}/{fileId}/thumbnail.webp"
 
-    try:
-        img = Image.open(io.BytesIO(raw_bytes))
-        img.verify()
-        img = Image.open(io.BytesIO(raw_bytes))
-    except Exception as img_error:
-        raise ValueError(
-            f"Uploaded file is corrupted or not a valid image: {img_error}"
-        )
-    
-    try:
-        display_buffer = io.BytesIO()
-        img.save(display_buffer,format="WEBP",quality=80)
-        display_buffer.seek(0)
+    display_exists = check_s3_key_exists(s3, PROCESSED_BUCKET, display_key)
+    thumb_exists = check_s3_key_exists(s3, PROCESSED_BUCKET, thumbnail_key)
 
-        thumb_img = img.copy()
-        thumb_img.thumbnail((200, 200))
-        thumb_buffer = io.BytesIO()
-        thumb_img.save(
-            thumb_buffer,
-            format="WEBP",
-            quality=80
+    if not(display_exists and thumb_exists):
+        try:
+            s3_response = s3.get_object(
+            Bucket=RAW_BUCKET,
+            Key=storageKey
         )
-        thumb_buffer.seek(0)
-    except Exception as e:
-        raise RuntimeError(
-            f"Error processing the file:{e}"
-        )
-    
-    display_key = (f"processed/{userId}/{fileId}/display.webp")
+        except Exception as minio_error:
+            raise RuntimeError(
+                f"Error while fetching data; {minio_error}"
+            )
+        
+        raw_bytes = s3_response["Body"].read()
 
-    thumbnail_key = (f"processed/{userId}/{fileId}/thumbnail.webp")
-    
-    try:
-        s3.put_object(
-        Bucket=PROCESSED_BUCKET,
-        Key=display_key,
-        Body=display_buffer,
-        ContentType="image/webp"
-        )   
+        try:
+            img = Image.open(io.BytesIO(raw_bytes))
+            img.verify()
+            img = Image.open(io.BytesIO(raw_bytes))
+        except Exception as img_error:
+            raise ValueError(
+                f"Uploaded file is corrupted or not a valid image: {img_error}"
+            )
+        
+        try:
+            display_buffer = io.BytesIO()
+            img.save(display_buffer,format="WEBP",quality=80)
+            display_buffer.seek(0)
 
-        s3.put_object(
+            thumb_img = img.copy()
+            thumb_img.thumbnail((200, 200))
+            thumb_buffer = io.BytesIO()
+            thumb_img.save(
+                thumb_buffer,
+                format="WEBP",
+                quality=80
+            )
+            thumb_buffer.seek(0)
+        except Exception as e:
+            raise RuntimeError(
+                f"Error processing the file:{e}"
+            )
+        
+        try:
+            s3.put_object(
             Bucket=PROCESSED_BUCKET,
-            Key=thumbnail_key,
-            Body=thumb_buffer,
+            Key=display_key,
+            Body=display_buffer,
             ContentType="image/webp"
-        )
-    except Exception as e:
-        raise RuntimeError(
-            f"Error uploading file:{e}"
-        )
+            )   
+
+            s3.put_object(
+                Bucket=PROCESSED_BUCKET,
+                Key=thumbnail_key,
+                Body=thumb_buffer,
+                ContentType="image/webp"
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"Error uploading file:{e}"
+            )
+    else:
+        print("[Idempotency Guard] Output of {fileId} already exists")
 
     return {
         "status": "complete",
@@ -168,7 +183,7 @@ def child_entry(job_data,result_queue):
         })
     except Exception as e:
         result_queue.put({
-            "success":False,
+            "success":False,    
             "error":str(e)
         })   
 

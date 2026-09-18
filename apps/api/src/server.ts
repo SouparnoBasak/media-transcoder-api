@@ -35,6 +35,16 @@ declare module '@fastify/jwt'{
     }
 }
 
+declare module 'fastify' {
+    interface FastifyInstance {
+        authenticate: (
+            request: FastifyRequest,
+            reply: FastifyReply
+        ) => Promise<void | FastifyReply>;
+    }
+}
+
+
 app.decorate('authenticate',async (request:FastifyRequest,reply:FastifyReply)=>{
     try{
         await request.jwtVerify();
@@ -190,6 +200,19 @@ app.post('/api/v1/files/complete',
         if(!file){
             return reply.code(404).send({ error: 'File record not found' });
         }
+
+        if(file.status==='COMPLETED' || file.status==='PROCESSING'){
+            return reply.code(200).send({
+                msg:file.status==='COMPLETED'?'File is already processed':'File is under processing',
+                ...file,
+                sizeBytes: file.sizeBytes.toString(),
+            })
+
+        }
+        if (file.status === 'FAILED') {
+            return reply.code(400).send({ error: 'Cannot trigger completion on a failed file' });
+        }
+
         const updatedFile=await prisma.file.update({
             where:{id:fileId},
             data:{status:'PROCESSING'},
@@ -200,6 +223,7 @@ app.post('/api/v1/files/complete',
             storageKey: file.storageKey,
             mimeType: file.mimeType,
         },{
+            jobId: `media-job-${file.id}`,
             attempts:3,
             backoff:{
                 type:'exponential',

@@ -26,6 +26,7 @@ model File {
   mimeType     String     @map("mime_type")
   sizeBytes    BigInt     @map("size_bytes")
   createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
   user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   jobs         Job[]
 
