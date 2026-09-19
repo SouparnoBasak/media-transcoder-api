@@ -1,7 +1,9 @@
 import { FastifyInstance } from 'fastify';
+import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
+import { UploadUrlSchema, CompleteUploadSchema, DownloadFileSchema } from '../../schemas/file.schema';
 import path from 'path';
 import { randomUUID } from 'node:crypto';
-import { PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { HeadObjectCommand,PutObjectCommand, GetObjectCommand, Bucket$ } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { prisma } from '../../lib/prisma';
 import { s3Client } from '../../lib/s3';
@@ -14,16 +16,19 @@ const MAX_USER_STORAGE_BYTES = 500 * 1024 * 1024;
 const BUCKET_NAME = process.env.RAW_MEDIA_BUCKET || 'raw-media-bucket';
 const PROCESSED_BUCKET = process.env.PROCESSED_MEDIA_BUCKET || 'processed-media-bucket';
 
-export async function fileRoutes(app:FastifyInstance){
-    app.post('/upload-url',{preHandler:[app.authenticate]},async (request,reply)=>{
-        const {originalName,mimeType,sizeBytes}=request.body as {originalName?:string,mimeType?:string,sizeBytes?:number};
+export async function fileRoutes(app: FastifyInstance<any, any, any, any, TypeBoxTypeProvider>){
+    app.post('/upload-url',{
+        schema: UploadUrlSchema,
+        preHandler: [app.authenticate],
+        },async (request,reply)=>{
+        const {originalName,mimeType,sizeBytes}=request.body;   
         if(!originalName||!mimeType||!sizeBytes){
             return reply.code(400).send({error:"Mising file metadata"});
         }
 
         const fileExt=path.extname(originalName).toLowerCase();
         if(!ALLOWED_EXTENSIONS.includes(fileExt)||!ALLOWED_MIME_TYPES.includes(mimeType)){
-            return reply.send(400).send({error:"Forbidden extension or unsupported MIME type"});
+            return reply.code(400).send({error:"Forbidden extension or unsupported MIME type"});
         }
         if(sizeBytes>MAX_FILE_SIZE_BYTES){
             return reply.code(400).send({error:`File size exceeds ${MAX_FILE_SIZE_BYTES/(1024*1024)} MB`});
@@ -50,7 +55,10 @@ export async function fileRoutes(app:FastifyInstance){
         )
         return reply.code(200).send({ fileId: fileRecord.id, url: uploadUrl, storageKey });
     });
-    app.post('/complete',{preHandler:[app.authenticate,app.verifyFileOwnership]},async (request,reply)=>{
+    app.post('/complete',{
+        schema: CompleteUploadSchema,
+        preHandler: [app.authenticate, app.verifyFileOwnership],
+        },async (request,reply)=>{
         const file=request.targetFile;
         if(!file){
             return reply.code(404).send({error: "File not found"});
@@ -65,6 +73,26 @@ export async function fileRoutes(app:FastifyInstance){
         if (file.status === 'FAILED') {
             return reply.code(400).send({ error: 'Cannot trigger completion on a failed file' });
         }
+        try{
+            const result=await s3Client.send(
+                new HeadObjectCommand({Bucket:BUCKET_NAME,Key:file.storageKey})
+            );
+            if (result.ContentLength !== Number(file.sizeBytes)) {
+                return reply.code(400).send({
+                    error: 'Uploaded file size does not match expected size',
+                });
+            }
+        } catch (error) {
+            request.log.error(
+                { fileId: file.id, error },
+                'Failed to verify uploaded object'
+            );
+
+            return reply.code(400).send({
+                error: 'Uploaded file was not found in storage',
+            });
+        }
+
         const updatedFile = await prisma.file.update({
             where: { id: file.id },
             data: { status: 'PROCESSING' },
@@ -79,7 +107,10 @@ export async function fileRoutes(app:FastifyInstance){
             file: { ...updatedFile, sizeBytes: updatedFile.sizeBytes.toString() },
         });
     });
-    app.get('/:id/download',{preHandler:[app.authenticate,app.verifyFileOwnership,]},async (request,reply)=>{
+    app.get('/:id/download',{
+            schema:DownloadFileSchema,
+            preHandler:[app.authenticate,app.verifyFileOwnership,]
+        },async (request,reply)=>{
         const file=request.targetFile;
         if(!file){
             return reply.code(404).send({error: "File not found"});
