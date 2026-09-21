@@ -33,6 +33,7 @@ async function deleteS3Prefix(bucket: string, prefix: string) {
     }
   } catch (error) {
     console.error(`[S3 Delete Error] Failed prefix cleanup "${prefix}" in bucket "${bucket}":`, error);
+    throw error //making sure any error in deletion will throw an over all error causing an transaction block
   }
 }
 

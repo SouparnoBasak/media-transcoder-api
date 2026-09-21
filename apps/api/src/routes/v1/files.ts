@@ -60,9 +60,12 @@ export async function fileRoutes(app: FastifyInstance<any, any, any, any, TypeBo
         preHandler: [app.authenticate, app.verifyFileOwnership],
         },async (request,reply)=>{
         const file=request.targetFile;
+
         if(!file){
             return reply.code(404).send({error: "File not found"});
         }
+        const traceId=request.id;
+        request.log.info({ fileId: file.id }, 'Processing request received');
         if(file?.status==='COMPLETED'||file?.status==='PROCESSING'){
             return reply.code(200).send({
                 msg: file.status === 'COMPLETED' ? 'File is already processed' : 'File is under processing',
@@ -93,18 +96,31 @@ export async function fileRoutes(app: FastifyInstance<any, any, any, any, TypeBo
             });
         }
 
-        const updatedFile = await prisma.file.update({
-            where: { id: file.id },
+        const result = await prisma.file.updateMany({
+            where: { 
+                id: file.id,
+                status:'PENDING'
+            },
             data: { status: 'PROCESSING' },
         });
+        if(result.count !==1){
+            return reply.code(200).send({
+                message: 'File is already being processed or has been processed',
+                file: {
+                ...file,
+                sizeBytes: file.sizeBytes.toString(),
+                },
+            });
+        }
         await mediaQueue.add(
             'process-media',
-            {fileId:file?.id,userId:file?.userId,storageKey:file?.storageKey,mimeType:file?.mimeType},
+            {fileId:file?.id,userId:file?.userId,storageKey:file?.storageKey,mimeType:file?.mimeType,traceId},
             {jobId:`media-job-${file?.id}`,attempts:3,backoff:{type:'exponential',delay:5000},removeOnFail:{age: 7 * 24 * 60 * 60}},
         )
+        request.log.info({ fileId: file.id }, 'Job successfully pushed to BullMQ');
         return reply.code(200).send({
             message: 'Upload confirmed, Processing queued',
-            file: { ...updatedFile, sizeBytes: updatedFile.sizeBytes.toString() },
+            file: { ...file, status:'PROCESSING' ,sizeBytes: file.sizeBytes.toString() },
         });
     });
     app.get('/:id/download',{
